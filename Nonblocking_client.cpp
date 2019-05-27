@@ -1,18 +1,18 @@
-// Windows socket 프로그래밍 클라이언트 코드 <파일 전송>
+// Windows socket 프로그래밍 클라이언트 코드 <Nonblocking>
 #define WIN32_LEAN_AND_MEAN
 
 #include<iostream>
 #include<string>
 #include<ws2tcpip.h>
 #include<winsock2.h>
-#include<filesystem>
 #include<fcntl.h>
+#include<time.h>
 
 using namespace std;
 
 #pragma comment (lib, "Ws2_32.lib")
 
-#define DEFAULT_BUFLEN 2048
+#define DEFAULT_BUFLEN 256
 #define DEFAULT_PORT "9000"
 
 int main()
@@ -56,11 +56,6 @@ int main()
 		WSACleanup();
 		return 1;
 	}
-	if (fcntl(ConnectSocket, F_SETFL, O_NONBLOCK) == -1)
-	{
-		cout << "error at file Control: " << WSAGetLastError() << endl;
-		return 1;
-	}
 
 	// 서버에 연결
 	iResult = connect(ConnectSocket, ptr->ai_addr, (int)ptr->ai_addrlen);
@@ -73,123 +68,35 @@ int main()
 	}
 
 	freeaddrinfo(result);
+	
+	int count = 0;
+	unsigned un = 0;
 
-	cout << "We'll start to sending a file.\n";
-
-	FILE* fp;
-	errno_t err;
-	char fileName[20] = "Adata";
-	err = fopen_s(&fp, fileName, "rb");		// 파일 열기 오류 검증 변수
-
-	if (err == 0)
+	// 서버에 전송
+	while (count < 5)
 	{
-		cout << "File open success!: " << fileName << endl;
-		// 파일 크기 계산
-		int iTest = fseek(fp, 0, SEEK_END);
-		if (iTest != 0)
+		ZeroMemory(buf, bufLen);
+		cout << ">> ";
+		cin.getline(buf, bufLen);
+
+		for (int i = 0; i < bufLen; i++)
+			if (buf[i] != '\0')
+				un++;
+
+		iResult = send(ConnectSocket, buf, un, 0);
+		if (iResult == 0)
 		{
-			cout << "Error! failed to calculate: " << fileName << "'s Size..\n";
+			cout << "Send failed with error: " << WSAGetLastError() << endl;
+			closesocket(ConnectSocket);
+			WSACleanup();
 			return 1;
 		}
-		double fileSize = ftell(fp);
-		cout << fileName << " size: " << fileSize << endl;
-		fseek(fp, 0, SEEK_SET);
-		double present = 0;
-		double total = fileSize;
-
-		do
+		else
 		{
-			if (iTest = recv(ConnectSocket, buf, bufLen, 0) == SOCKET_ERROR)
-			{
-				cout << "failed recv " << WSAGetLastError() << endl;
-				closesocket(ConnectSocket);
-				WSACleanup();
-				return 1;
-			}
-			ZeroMemory(buf, bufLen);
-
-			if ((total - present) < bufLen)
-			{
-				fread(buf, sizeof(char), total - present, fp);
-				if ((iResult = send(ConnectSocket, buf, total - present, 0)) > 0)
-				{
-					cout << "file sending.. \n";
-					if (iResult < (total - present))
-					{
-						fileSize -= iResult;
-						present = ftell(fp);
-						cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-
-						ZeroMemory(buf, bufLen);
-						fread(buf, sizeof(char), (total - present), fp);
-						if (iResult = send(ConnectSocket, buf, (total - present), 0) > 0)
-						{
-							fileSize -= iResult;
-							present = ftell(fp);
-							cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-						}
-					}
-					else
-					{
-						fileSize -= iResult;
-						present = ftell(fp);
-						cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-					}
-				}
-				else
-				{
-					cout << "Sending failed with error: " << WSAGetLastError() << endl;
-					closesocket(ConnectSocket);
-					WSACleanup();
-					return 1;
-				}
-			}
-			else
-			{
-				fread(buf, sizeof(char), bufLen, fp);
-				if ((iResult = send(ConnectSocket, buf, bufLen, 0)) > 0)
-				{
-					cout << "file sending.. \n";
-					if (iResult < bufLen)
-					{
-						fileSize -= iResult;
-						present = ftell(fp);
-						cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-
-						ZeroMemory(buf, bufLen);
-						fread(buf, sizeof(char), (total - present), fp);
-						if (iResult = send(ConnectSocket, buf, (total - present), 0) > 0)
-						{
-							fileSize -= iResult;
-							present = ftell(fp);
-							cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-						}
-					}
-					else
-					{
-						fileSize -= iResult;
-						present = ftell(fp);
-						cout << "Sent: " << iResult << " byte (s)  present: " << (present / total) * 100 << "% " << endl;
-					}
-				}
-				else
-				{
-					cout << "Sending failed with error: " << WSAGetLastError() << endl;
-					closesocket(ConnectSocket);
-					WSACleanup();
-					return 1;
-				}
-			}
-
-
-		} while (present != total);
+			cout << "#0" << count + 1 << "  Sent: " << iResult << " byte (s)\n";
+			count++;
+		}
 	}
-	else
-	{
-		cout << "Opening " << fileName << " failed with error!\n";
-		return 1;
-	}
-
 
 	// 더이상 전송할 데이터가 없을 때 소켓 닫기
 	iResult = shutdown(ConnectSocket, SD_SEND);

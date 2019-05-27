@@ -2,15 +2,20 @@
 #include<winsock2.h>
 #include<ws2tcpip.h>
 #include<iostream>
-#include<filesystem>
-#include<fstream>
 
-#define DEFAULT_BUFLEN 2048
+#define DEFAULT_BUFLEN 256
 #define DEFAULT_PORT "9000"
+#define BACKLOG 10
 
 #pragma comment (lib, "ws2_32.lib")		
 
 using namespace std;
+
+void showInfoConn(SOCKET *client)
+{
+	
+}
+
 int main()
 {
 	WSADATA wsadata;
@@ -65,7 +70,7 @@ int main()
 		return 1;
 	}
 
-	if (listen(ListenSocket, 3) == SOCKET_ERROR)
+	if (listen(ListenSocket, BACKLOG) == SOCKET_ERROR)
 	{
 		cout << "Listen failed with error: " << WSAGetLastError() << endl;
 		closesocket(ListenSocket);
@@ -75,108 +80,85 @@ int main()
 
 	cout << "Wating for Connection.. " << endl;
 
-	// client 접속을 허가
 	sockaddr_in client;
 	int clientSize = sizeof(client);
-
-	SOCKET clientSocket = accept(ListenSocket, (sockaddr*)& client, &clientSize);
-	if (clientSocket == INVALID_SOCKET)
+	SOCKET clientSocket;
+	
+	// client 접속 받기
+	while (true)
 	{
-		cout << "accept faild: " << WSAGetLastError() << endl;
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
-	}
-
-	// client 접속 내용 전시
-	char host[NI_MAXHOST];
-	char service[NI_MAXSERV];
-
-	ZeroMemory(host, NI_MAXHOST);
-	ZeroMemory(service, NI_MAXSERV);
-
-	if (getnameinfo((sockaddr*)& client, sizeof(client), host, NI_MAXHOST,
-		service, NI_MAXSERV, 0) == 0)
-	{
-		cout << host << " connected on port " << service << endl;
-	}
-	else
-	{
-		inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-		cout << host << "connected on port " << service << endl;
-	}
-
-	closesocket(ListenSocket);
-
-	FILE* fp;
-	errno_t err;
-	char fileName[20] = "Bdata";
-	err = fopen_s(&fp, fileName, "wb");		// 파일 열기 오류 검증 변수
-	int iTest;
-
-
-	if (err == 0)
-	{
-		cout << "File open success!: " << fileName << endl;
-
-		do
+		clientSocket = accept(ListenSocket, (sockaddr*)& client, &clientSize);
+		if (clientSocket == INVALID_SOCKET)
 		{
-			iTest = send(clientSocket, buf, bufLen, 0);
-			if (iTest == SOCKET_ERROR)
+			cout << "accept faild: " << WSAGetLastError() << endl;
+			closesocket(ListenSocket);
+			WSACleanup();
+			return 1;
+		}
+		
+		// client 접속 내용 전시
+		char host[NI_MAXHOST];
+		char service[NI_MAXSERV];
+
+		ZeroMemory(host, NI_MAXHOST);
+		ZeroMemory(service, NI_MAXSERV);
+
+		if (getnameinfo((sockaddr*)& client, sizeof(client), host, NI_MAXHOST,
+			service, NI_MAXSERV, 0) == 0)
+		{
+			cout << host << " connected on port " << service << endl;
+		}
+		else
+		{
+			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
+			cout << host << "connected on port " << service << endl;
+		}
+
+		// 주기적으로 폴링할 시간
+		struct timeval timeout;
+		timeout.tv_sec = 5;
+		timeout.tv_usec = 500000;
+
+		// select 함수를 통해 소켓의 이벤트에 반응
+		
+
+		while (1)
+		{
+			ZeroMemory(buf, bufLen);
+			iResult = recv(clientSocket, buf, bufLen, 0);
+			if (iResult == 0)
 			{
-				cout << "failed send " << WSAGetLastError() << endl;
+				cout << "Recv failed with error: " << WSAGetLastError() << endl;
 				closesocket(clientSocket);
 				WSACleanup();
 				return 1;
-			}
-
-			ZeroMemory(buf, bufLen);
-			if ((iResult = recv(clientSocket, buf, bufLen, 0)) > 0)
-			{
-				cout << "file receiving.. \n";
-				if (iResult < bufLen)
-				{
-					fwrite(buf, sizeof(char), iResult, fp);
-					cout << "received: " << iResult << " byte (s)" << endl;
-					iResult = -1;
-				}
-				else
-				{
-					fwrite(buf, sizeof(char), bufLen, fp);
-					cout << "received: " << iResult << " byte (s)" << endl;
-				}
 			}
 			else
 			{
-				cout << "Receiving failed with error: " << WSAGetLastError() << endl;
-				closesocket(clientSocket);
-				WSACleanup();
-				return 1;
+				cout << "Received: " << iResult << "byte (s)\n";
+				for (int i = 0; i < bufLen; i++)
+					if(buf[i] != '\0')
+						cout << buf[i];
 			}
+		}
 
-		} while (iResult >= 0);
-	}
-	else
-	{
-		cout << "Opening " << fileName << " failed with error!\n";
-		return 1;
-	}
+		closesocket(ListenSocket);
 
-
-	// 더이상 전송이 없다면 종료
-	iResult = shutdown(clientSocket, SD_SEND);
-	if (iResult == SOCKET_ERROR)
-	{
-		cout << "shutdown failed: " << WSAGetLastError() << endl;
-		closesocket(clientSocket);
-		WSACleanup();
-		return 1;
-	}
-	else
-	{
-		cout << "shutdown connection with " << host << " on " << service << endl;
-		closesocket(clientSocket);
-		WSACleanup();
-		return 0;
+		// 더이상 전송이 없다면 종료
+		iResult = shutdown(clientSocket, SD_SEND);
+		if (iResult == SOCKET_ERROR)
+		{
+			cout << "shutdown failed: " << WSAGetLastError() << endl;
+			closesocket(clientSocket);
+			WSACleanup();
+			return 1;
+		}
+		else
+		{
+			cout << "shutdown connection\n";
+			closesocket(clientSocket);
+			WSACleanup();
+			return 0;
+		}
 	}
 }
