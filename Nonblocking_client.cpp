@@ -1,12 +1,10 @@
-// Windows socket 프로그래밍 클라이언트 코드 <Nonblocking>
+// Windows socket 프로그래밍 클라이언트 코드 <다중 연결>
 #define WIN32_LEAN_AND_MEAN
 
 #include<iostream>
 #include<string>
 #include<ws2tcpip.h>
 #include<winsock2.h>
-#include<fcntl.h>
-#include<time.h>
 
 using namespace std;
 
@@ -14,6 +12,22 @@ using namespace std;
 
 #define DEFAULT_BUFLEN 256
 #define DEFAULT_PORT "9000"
+
+void shoutError(string errormsg)
+{
+	cout << errormsg << endl;
+	WSACleanup();
+	exit(1);
+}
+
+void shoutError(addrinfo* res, SOCKET sock, string errormsg)
+{
+	cout << errormsg << endl;
+	freeaddrinfo(res);
+	closesocket(sock);
+	WSACleanup();
+	exit(1);
+}
 
 int main()
 {
@@ -26,10 +40,7 @@ int main()
 
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (iResult == INVALID_SOCKET)
-	{
-		cout << "WSAStartup failed: " << WSAGetLastError() << endl;
-		return 1;
-	}
+		shoutError("WSAStartup() failed!\n");
 
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -39,35 +50,19 @@ int main()
 	// 서버 주소와 포트를 설정
 	iResult = getaddrinfo("127.0.0.1", DEFAULT_PORT, &hints, &result);
 	if (iResult != 0)
-	{
-		cout << "getaddrinfo failed: " << iResult << endl;
-		WSACleanup();
-		return 1;
-	}
+		shoutError("getaddrinfo() failed!\n");
 
 	SOCKET ConnectSocket = INVALID_SOCKET;
 	ptr = result;
 
 	ConnectSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
 	if (ConnectSocket == INVALID_SOCKET)
-	{
-		cout << "Error at socket(): " << WSAGetLastError() << endl;
-		freeaddrinfo(result);
-		WSACleanup();
-		return 1;
-	}
+		shoutError(result, ConnectSocket, "socket error!\n");
 
 	// 서버에 연결
 	iResult = connect(ConnectSocket, ptr->ai_addr, (int)ptr->ai_addrlen);
 	if (iResult == SOCKET_ERROR)
-	{
-		cout << "Unable to connect to server!" << endl;
-		closesocket(ConnectSocket);
-		WSACleanup();
-		return 1;
-	}
-
-	freeaddrinfo(result);
+		shoutError(result, ConnectSocket, "connet() error!\n");
 	
 	int count = 0;
 	unsigned un = 0;
@@ -94,9 +89,11 @@ int main()
 		else
 		{
 			cout << "#0" << count + 1 << "  Sent: " << iResult << " byte (s)\n";
+			iResult = 0;
 			count++;
 		}
 	}
+	// 서버로부터 오는 다른 클라이언트의 대화를 받아오기
 
 	// 더이상 전송할 데이터가 없을 때 소켓 닫기
 	iResult = shutdown(ConnectSocket, SD_SEND);

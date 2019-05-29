@@ -1,4 +1,4 @@
-// Windows socket 프로그래밍 서버 코드 <파일 전송>
+// Windows socket 프로그래밍 서버 코드 <다중 연결>
 #include<winsock2.h>
 #include<ws2tcpip.h>
 #include<iostream>
@@ -11,9 +11,32 @@
 
 using namespace std;
 
-void showInfoConn(SOCKET *client)
+void shoutError(string errormsg)
 {
-	
+	cout << errormsg << endl;
+	WSACleanup();
+	exit(1);
+}
+
+void shoutError(addrinfo* res, SOCKET sock, string errormsg)
+{
+	cout << errormsg << endl;
+	freeaddrinfo(res);
+	closesocket(sock);
+	WSACleanup();
+	exit(1);
+}
+
+string naming(unsigned i)
+{
+	if (i % 2)
+		return "Doublen";
+	else if (i % 3)
+		return "Trillon";
+	else if (i % 5)
+		return "Fiphon";
+	else if (i % 7)
+		return "Lockiln";
 }
 
 int main()
@@ -26,10 +49,7 @@ int main()
 
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsadata);
 	if (iResult != 0)
-	{
-		cout << "WSAStartup failed: " << iResult << endl;
-		return 1;
-	}
+		shoutError("WSAStartup failed!\n");
 
 	struct addrinfo* result = NULL, hints;
 
@@ -42,123 +62,101 @@ int main()
 	// 서버 주소와 포트 번호를 등록
 	iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
 	if (iResult != 0)
-	{
-		cout << "getaddrinfo failed with error: " << iResult << endl;
-		WSACleanup();
-		return 1;
-	}
+		shoutError("getaddrinfo failed!\n");
 
 	// client 접속을 받을 소켓 생성
 	SOCKET ListenSocket = INVALID_SOCKET;
 	ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if (ListenSocket == INVALID_SOCKET)
-	{
-		cout << "Error at socket(): " << WSAGetLastError() << endl;
-		freeaddrinfo(result);
-		WSACleanup();
-		return 1;
-	}
+		shoutError("socket error!\n");
 
 	// TCP 통신 소켓 설정
 	iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
 	if (iResult == SOCKET_ERROR)
-	{
-		cout << "bind failed with error: " << WSAGetLastError() << endl;
-		freeaddrinfo(result);
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
-	}
+		shoutError(result, ListenSocket, "bind() failed!\n");
 
+	// listen 실행
 	if (listen(ListenSocket, BACKLOG) == SOCKET_ERROR)
-	{
-		cout << "Listen failed with error: " << WSAGetLastError() << endl;
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
-	}
+		shoutError(result, ListenSocket, "listen() failed!\n");
 
 	cout << "Wating for Connection.. " << endl;
 
-	sockaddr_in client;
-	int clientSize = sizeof(client);
-	SOCKET clientSocket;
-	
-	// client 접속 받기
+	struct timeval timeout;
+	fd_set read, temp;
+	int res;
+
+	FD_ZERO(&read);
+	FD_SET(ListenSocket, &read);
+
 	while (true)
 	{
-		clientSocket = accept(ListenSocket, (sockaddr*)& client, &clientSize);
-		if (clientSocket == INVALID_SOCKET)
-		{
-			cout << "accept faild: " << WSAGetLastError() << endl;
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
-		}
-		
-		// client 접속 내용 전시
-		char host[NI_MAXHOST];
-		char service[NI_MAXSERV];
+		temp = read;
 
-		ZeroMemory(host, NI_MAXHOST);
-		ZeroMemory(service, NI_MAXSERV);
-
-		if (getnameinfo((sockaddr*)& client, sizeof(client), host, NI_MAXHOST,
-			service, NI_MAXSERV, 0) == 0)
-		{
-			cout << host << " connected on port " << service << endl;
-		}
-		else
-		{
-			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-			cout << host << "connected on port " << service << endl;
-		}
-
-		// 주기적으로 폴링할 시간
-		struct timeval timeout;
 		timeout.tv_sec = 5;
-		timeout.tv_usec = 500000;
+		timeout.tv_usec = 50000;
 
-		// select 함수를 통해 소켓의 이벤트에 반응
-		
-
-		while (1)
-		{
-			ZeroMemory(buf, bufLen);
-			iResult = recv(clientSocket, buf, bufLen, 0);
-			if (iResult == 0)
-			{
-				cout << "Recv failed with error: " << WSAGetLastError() << endl;
-				closesocket(clientSocket);
-				WSACleanup();
-				return 1;
-			}
-			else
-			{
-				cout << "Received: " << iResult << "byte (s)\n";
-				for (int i = 0; i < bufLen; i++)
-					if(buf[i] != '\0')
-						cout << buf[i];
-			}
-		}
-
-		closesocket(ListenSocket);
-
-		// 더이상 전송이 없다면 종료
-		iResult = shutdown(clientSocket, SD_SEND);
-		if (iResult == SOCKET_ERROR)
-		{
-			cout << "shutdown failed: " << WSAGetLastError() << endl;
-			closesocket(clientSocket);
-			WSACleanup();
-			return 1;
-		}
+		res = select(NULL, &temp, NULL, NULL, &timeout);
+		if (res == SOCKET_ERROR)
+			break;					// select() 오류시 루프 탈출
+		else if (res == 0)
+			continue;				// 시간 초과시 다음 루프 시작
 		else
 		{
-			cout << "shutdown connection\n";
-			closesocket(clientSocket);
-			WSACleanup();
-			return 0;
+			// 순차적으로 read의 fd_set의 변화를 탐색
+			for (unsigned i = 0; i < read.fd_count; i++)
+			{
+				// 변화된 부분이 있다면 FD_ISSET은 양수를 반환
+				if (FD_ISSET(read.fd_array[i], &temp))
+				{
+					if (ListenSocket == read.fd_array[i])
+					{
+						sockaddr_in client;
+						int clientSize = sizeof(client);
+						SOCKET clientSocket = accept(ListenSocket, (sockaddr*)& client, &clientSize);
+						if (clientSocket == INVALID_SOCKET)
+						{
+							shoutError(result, clientSocket, "accept() failed!\n");
+						}
+						FD_SET(clientSocket, &read);
+
+						// client 접속 내용 전시
+						char host[NI_MAXHOST];
+						char service[NI_MAXSERV];
+
+						ZeroMemory(host, NI_MAXHOST);
+						ZeroMemory(service, NI_MAXSERV);
+
+						if (getnameinfo((sockaddr*)& client, sizeof(client), host, NI_MAXHOST,
+							service, NI_MAXSERV, 0) == 0)
+						{
+							cout << host << " connected on port " << service << endl;
+						}
+						else
+						{
+							inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
+							cout << host << "connected on port " << service << endl;
+						}
+					}
+					else
+					{
+						ZeroMemory(buf, bufLen);
+						iResult = recv(read.fd_array[i], buf, bufLen, 0);
+						if (iResult <= 0)
+						{
+							// 없다면 닫기
+							FD_CLR(read.fd_array[i], &read);
+							cout << "With " << read.fd_array[i] << " has been disconnected.\n";
+							closesocket(temp.fd_array[i]);
+						}
+						else
+						{
+							// 받은 데이터를 다른 연결된 클라이언트에도 보내주기
+							cout << naming(read.fd_array[i]) << ": " << buf << "__" << iResult << "byte (s)\n";
+							
+						}
+					}
+				}
+			}
 		}
 	}
 }
