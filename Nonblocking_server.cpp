@@ -27,16 +27,10 @@ void shoutError(addrinfo* res, SOCKET sock, string errormsg)
 	exit(1);
 }
 
-string naming(unsigned i)
+int sendName(SOCKET s, char* name, int len)
 {
-	if (i % 2)
-		return "Doublen";
-	else if (i % 3)
-		return "Trillon";
-	else if (i % 5)
-		return "Fiphon";
-	else if (i % 7)
-		return "Lockiln";
+	char* buffer = name;
+	return recv(s, buffer, len, 0);
 }
 
 int main()
@@ -93,13 +87,19 @@ int main()
 		temp = read;
 
 		timeout.tv_sec = 5;
-		timeout.tv_usec = 50000;
+		timeout.tv_usec = 0;
 
+		// true 루프를 돌면서
 		res = select(NULL, &temp, NULL, NULL, &timeout);
 		if (res == SOCKET_ERROR)
+		{
+			cout << "error!\n";
 			break;					// select() 오류시 루프 탈출
+		}
 		else if (res == 0)
+		{
 			continue;				// 시간 초과시 다음 루프 시작
+		}
 		else
 		{
 			// 순차적으로 read의 fd_set의 변화를 탐색
@@ -114,9 +114,8 @@ int main()
 						int clientSize = sizeof(client);
 						SOCKET clientSocket = accept(ListenSocket, (sockaddr*)& client, &clientSize);
 						if (clientSocket == INVALID_SOCKET)
-						{
 							shoutError(result, clientSocket, "accept() failed!\n");
-						}
+
 						FD_SET(clientSocket, &read);
 
 						// client 접속 내용 전시
@@ -129,19 +128,22 @@ int main()
 						if (getnameinfo((sockaddr*)& client, sizeof(client), host, NI_MAXHOST,
 							service, NI_MAXSERV, 0) == 0)
 						{
-							cout << host << " connected on port " << service << endl;
+							cout << "Connection on port: " << service << endl;
 						}
 						else
 						{
 							inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-							cout << host << "connected on port " << service << endl;
+							cout << "Connection on port: " << service << endl;
 						}
 					}
 					else
 					{
+						char name[20];
+						int iName = recv(read.fd_array[i], name, 20, 0);
+
 						ZeroMemory(buf, bufLen);
 						iResult = recv(read.fd_array[i], buf, bufLen, 0);
-						if (iResult <= 0)
+						if (iName <= 0 && iResult <= 0)
 						{
 							// 없다면 닫기
 							FD_CLR(read.fd_array[i], &read);
@@ -151,7 +153,22 @@ int main()
 						else
 						{
 							// 받은 데이터를 다른 연결된 클라이언트에도 보내주기
-							cout << naming(read.fd_array[i]) << ": " << buf << "__" << iResult << "byte (s)\n";
+							cout << name << ": " << buf << "__" << iResult << "byte (s)\n";
+							
+							// read.fd_array[] 중 서버와 연결된 클라이언트를 탐색
+							for (unsigned i = 0; i < read.fd_count; i++)
+							{
+								// 찾은 클라이언트에 메시지 전송
+								iName = send(read.fd_array[i], name, 20, 0);
+								iResult = send(read.fd_array[i], buf, bufLen, 0);
+								
+								if (iName <= 0 && iResult <= 0)
+									shoutError("send failed!\n");
+								else
+								{
+									cout << "[" << name << "]: " << buf << "\n";
+								}
+							}
 							
 						}
 					}

@@ -29,6 +29,11 @@ void shoutError(addrinfo* res, SOCKET sock, string errormsg)
 	exit(1);
 }
 
+int sendName(SOCKET s, char* name, int len)
+{
+	return send(s, name, len, 0);
+}
+
 int main()
 {
 	WSADATA wsaData;
@@ -62,47 +67,55 @@ int main()
 	// 서버에 연결
 	iResult = connect(ConnectSocket, ptr->ai_addr, (int)ptr->ai_addrlen);
 	if (iResult == SOCKET_ERROR)
-		shoutError(result, ConnectSocket, "connet() error!\n");
+		shoutError(result, ConnectSocket, "connect() error!\n");
 	
 	int count = 0;
-	unsigned un = 0;
+	char name[20];
+
+	cout << "Set a Name of yours: ";
+	cin.getline(name, 20);
+	cout << endl;
+	int iName = 0;
 
 	// 서버에 전송
 	while (count < 5)
 	{
+		if ((iName = sendName(ConnectSocket, name, 20)) <= 0)
+			shoutError(result, ConnectSocket, "failed to send info!\n");
+
 		ZeroMemory(buf, bufLen);
 		cout << ">> ";
 		cin.getline(buf, bufLen);
 
-		for (int i = 0; i < bufLen; i++)
-			if (buf[i] != '\0')
-				un++;
-
-		iResult = send(ConnectSocket, buf, un, 0);
-		if (iResult == 0)
+		if (strcmp(buf, "quit") == 0)
 		{
-			cout << "Send failed with error: " << WSAGetLastError() << endl;
-			closesocket(ConnectSocket);
-			WSACleanup();
-			return 1;
+			cout << "quit!\n";
+			exit(1);
 		}
+
+		iResult = send(ConnectSocket, buf, bufLen, 0);
+		if (iResult == 0)
+			shoutError(result, ConnectSocket, "failed to send!\n");
 		else
 		{
 			cout << "#0" << count + 1 << "  Sent: " << iResult << " byte (s)\n";
-			iResult = 0;
 			count++;
 		}
-	}
-	// 서버로부터 오는 다른 클라이언트의 대화를 받아오기
 
+		// 서버로부터 오는 다른 클라이언트의 대화를 받아오기
+		iName = recv(ConnectSocket, name, 20, 0);
+		iResult = recv(ConnectSocket, buf, bufLen, 0);
+		
+		if (iName <= 0 && iResult <= 0)
+			shoutError(result, ConnectSocket, "failed to recv\n");
+		else
+			cout << "[" << name << "]: " << buf << endl;
+	}
 	// 더이상 전송할 데이터가 없을 때 소켓 닫기
 	iResult = shutdown(ConnectSocket, SD_SEND);
 	if (iResult == SOCKET_ERROR)
 	{
-		cout << "shutdown failed: " << WSAGetLastError() << endl;
-		closesocket(ConnectSocket);
-		WSACleanup();
-		return 1;
+		shoutError(result, ConnectSocket, "failed to shutdown!\n");
 	}
 
 	// 종료
