@@ -1,0 +1,2 @@
+C:\Users\Redwood\source\repos\PioneerRedwood\Project-03\WindowsNetworking\Debug\WindowsNetworking.exe
+C:\Users\Redwood\source\repos\PioneerRedwood\Project-03\WindowsNetworking\Debug\WindowsNetworking.pdb
